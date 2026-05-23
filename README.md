@@ -41,3 +41,37 @@ Each script directory can be developed, tested, and versioned independently. Use
 ## License
 
 Public domain. Free to use and modify.
+
+```
+AutoHotkey
+├─ Copy-MarkdownContent
+│  ├─ commands.md
+│  ├─ Copy-MarkdownContent.ahk
+│  ├─ README.md
+│  ├─ test.py
+│  └─ testing
+│     ├─ .templates
+│     │  └─ Case-{case_name}
+│     │     └─ {YYYY_MM_DD}-{HH_mm}
+│     │        ├─ script-output-{CASE}-windows_explorer-file_multi
+│     │        ├─ script-output-{CASE}-windows_explorer-file_single
+│     │        ├─ script-output-{CASE}-windows_search-file_multi
+│     │        └─ script-output-{CASE}-windows_search-file_single
+│     ├─ clipboard_issues
+│     │  └─ 2026_05_23-20_07
+│     │     ├─ script-output-clipboard_issues-windows_explorer-file_multi
+│     │     ├─ script-output-clipboard_issues-windows_explorer-file_single
+│     │     ├─ script-output-clipboard_issues-windows_search-file_multi
+│     │     └─ script-output-clipboard_issues-windows_search-file_single
+│     ├─ logs
+│     │  └─ execution.jsonl
+│     ├─ parameters.jsonl
+│     └─ process.jsonl
+├─ DateStamps
+│  ├─ DateStamps.ahk
+│  ├─ README.md
+│  └─ settings.ini
+├─ desktop.ini
+└─ README.md
+
+```
