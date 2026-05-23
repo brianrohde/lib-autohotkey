@@ -105,11 +105,13 @@ CopyMarkdownContent() {
         }
         ToolTip "✓ Copied " processedCount " file(s)"
         SetTimer () => ToolTip(), -2000
+        LogClipboardOutput(result, output)
     } else {
         A_Clipboard := debug
         result["status"] := "failed"
         ToolTip "⚠ No files processed (failed: " failedCount ", skipped: " skippedCount ")"
         SetTimer () => ToolTip(), -2000
+        LogClipboardOutput(result, debug)
     }
 
     return result
@@ -234,6 +236,46 @@ GetSelectedFilesFromClipboard(&debugOut := "") {
     return files
 }
 
+LogClipboardOutput(result, output) {
+    global scriptDir
+
+    ; Determine scenario based on file count
+    fileCount := result["files_processed"]
+    if (fileCount = 0)
+        return
+
+    scenario := ""
+    if (fileCount = 1)
+        scenario := "single_file"
+    else if (fileCount <= 5)
+        scenario := "multi_file"
+    else
+        scenario := "many_files"
+
+    ; Check if output is large
+    outputSize := StrLen(output)
+    if (outputSize > 100000)
+        scenario := scenario . "_large"
+
+    ; Create output filename
+    timestamp := FormatTime(A_Now, "yyyy_MM_dd-HH_mm_ss")
+    outputFileName := "script-output-" . scenario . "-" . timestamp . ".txt"
+
+    ; Write to testing directory
+    testingDir := scriptDir . "\testing"
+    outputFilePath := testingDir . "\" . outputFileName
+
+    try {
+        fileHandle := FileOpen(outputFilePath, "w")
+        fileHandle.Write(output)
+        fileHandle.Close()
+    }
+    catch as err {
+        ; Silently fail if testing directory doesn't exist
+        return
+    }
+}
+
 LogExecution(result) {
     global logsDir, logsFile
 
@@ -242,9 +284,9 @@ LogExecution(result) {
         DirCreate(logsDir)
     }
 
-    ; Create JSON log entry
+    ; Create JSON log entry with proper escaping
     timestamp := FormatTime(A_Now, "yyyy-MM-dd'T'HH:mm:ss")
-    jsonEntry := Format('{{"timestamp":"{}","status":"{}","files_requested":{},"files_processed":{},"files_failed":{},"files_skipped":{}}}', timestamp, result["status"], result["files_requested"], result["files_processed"], result["files_failed"], result["files_skipped"])
+    jsonEntry := "{""timestamp"":""" . timestamp . """,""status"":""" . result["status"] . """,""files_requested"":" . result["files_requested"] . ",""files_processed"":" . result["files_processed"] . ",""files_failed"":" . result["files_failed"] . ",""files_skipped"":" . result["files_skipped"] . "}"
 
     ; Append to execution.jsonl
     fileHandle := FileOpen(logsFile, "a")

@@ -11,6 +11,18 @@ try:
 except ImportError:
     argcomplete = None
 
+
+def safe_print(text):
+    """Print text safely, handling Unicode encoding errors."""
+    try:
+        print(text)
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        # Replace Unicode characters with ASCII alternatives
+        safe_text = text.replace('✓', '[OK]').replace('✗', '[X]').replace('⚠', '[!]')
+        safe_text = safe_text.replace('📋', '[*]').replace('⏳', '[...]').replace('🔄', '[>>]')
+        safe_text = safe_text.replace('📊', '[STATS]').replace('📂', '[DIR]')
+        print(safe_text)
+
 SCRIPT_DIR = Path(__file__).parent
 TESTING_DIR = SCRIPT_DIR / "testing"
 TEMPLATES_DIR = TESTING_DIR / ".templates"
@@ -81,8 +93,8 @@ def get_relative_file_paths(case_name, timestamp):
     return files
 
 
-def generate_case(case_name, case_description, test_paths=None):
-    """Generate a new test case with template structure."""
+def generate_case(case_name, case_description, test_paths=None, use_fixtures=None):
+    """Generate a new test case with template structure and optional fixtures."""
     try:
         case_dir = TESTING_DIR / case_name
 
@@ -125,6 +137,31 @@ def generate_case(case_name, case_description, test_paths=None):
                 new_name = file_path.name.replace("{CASE}", case_name)
                 file_path.rename(file_path.parent / new_name)
 
+        # Setup inputs directory and copy fixtures if requested
+        inputs_dir = case_dir / "inputs"
+        inputs_dir.mkdir(exist_ok=True)
+        copied_fixtures = []
+
+        if use_fixtures:
+            fixtures_dir = TEMPLATES_DIR / "fixtures"
+            if fixtures_dir.exists():
+                fixture_list = use_fixtures if isinstance(use_fixtures, list) else [use_fixtures]
+                for fixture in fixture_list:
+                    fixture_path = fixtures_dir / fixture
+                    if fixture_path.exists():
+                        dest_path = inputs_dir / fixture
+                        shutil.copy2(fixture_path, dest_path)
+                        copied_fixtures.append(str(dest_path))
+                        try:
+                            print(f"✓ Copied fixture: {fixture}")
+                        except (UnicodeEncodeError, UnicodeDecodeError):
+                            print(f"[+] Copied fixture: {fixture}")
+                    else:
+                        try:
+                            print(f"⚠ Fixture not found: {fixture}")
+                        except (UnicodeEncodeError, UnicodeDecodeError):
+                            print(f"[!] Fixture not found: {fixture}")
+
         # Generate relative file paths
         relative_paths = get_relative_file_paths(case_name, timestamp)
 
@@ -135,6 +172,7 @@ def generate_case(case_name, case_description, test_paths=None):
             "case_description": case_description,
             "relative_file_paths": relative_paths,
             "test_input_paths": test_paths or [],
+            "fixture_files": copied_fixtures,
             "created_at": timestamp,
         }
         save_parameters(cases)
@@ -143,7 +181,7 @@ def generate_case(case_name, case_description, test_paths=None):
             action="generate-case",
             status="success",
             case_name=case_name,
-            details={"timestamp": timestamp, "file_count": len(relative_paths)},
+            details={"timestamp": timestamp, "file_count": len(relative_paths), "fixtures_copied": len(copied_fixtures)},
         )
 
         # Output relative file paths
@@ -310,8 +348,226 @@ def update_paths(case_name):
         sys.exit(1)
 
 
+def loop_cases(json_out=False):
+    """Iterate through all test cases and run them, outputting results for agent consumption."""
+    try:
+        cases = load_parameters()
+
+        if not cases:
+            safe_print("No test cases found in parameters.jsonl")
+            if json_out:
+                safe_print(json.dumps({"status": "no_cases", "cases": []}))
+            return
+
+        safe_print(f"[>>] Running {len(cases)} test case(s)...")
+
+        results = {
+            "timestamp": datetime.now().isoformat(),
+            "total_cases": len(cases),
+            "cases": [],
+        }
+
+        case_names = sorted(cases.keys())
+        for i, case_name in enumerate(case_names, 1):
+            case_data = cases[case_name]
+            safe_print(f"\n[{i}/{len(cases)}] Running: {case_name}")
+            safe_print(f"      Description: {case_data.get('case_description', 'N/A')}")
+
+            case_result = {
+                "case_name": case_name,
+                "description": case_data.get("case_description", ""),
+                "fixtures_count": len(case_data.get("fixture_files", [])),
+                "status": "unknown",
+                "execution_log": None,
+                "validation_summary": None,
+            }
+
+            # Check if execution logs exist for this case
+            logs_file = TESTING_DIR / "logs" / "execution.jsonl"
+            if logs_file.exists():
+                try:
+                    with open(logs_file, "r") as f:
+                        lines = f.readlines()
+                        if lines:
+                            # Find last valid JSON line
+                            for line in reversed(lines):
+                                try:
+                                    last_log = json.loads(line.strip())
+                                    if last_log:
+                                        case_result["execution_log"] = last_log
+                                        case_result["status"] = last_log.get("status", "unknown")
+                                        safe_print(f"      Execution: {last_log.get('status')} "
+                                                   f"({last_log.get('files_processed')}/{last_log.get('files_requested')} processed)")
+                                        break
+                                except json.JSONDecodeError:
+                                    continue
+                except Exception as e:
+                    safe_print(f"      [!] Could not read logs: {e}")
+
+            # Check for captured outputs
+            script_outputs = list(TESTING_DIR.glob("script-output-*.txt"))
+            if script_outputs:
+                case_result["captured_outputs"] = len(script_outputs)
+                safe_print(f"      Outputs: {len(script_outputs)} clipboard capture(s)")
+
+            # Get validation status
+            fixture_files = case_data.get("fixture_files", [])
+            if fixture_files:
+                fixtures_exist = sum(1 for f in fixture_files if Path(f).exists())
+                case_result["fixtures_ready"] = fixtures_exist == len(fixture_files)
+                safe_print(f"      Fixtures: {fixtures_exist}/{len(fixture_files)} ready")
+
+            results["cases"].append(case_result)
+
+        # Calculate summary
+        results["summary"] = {
+            "success_count": sum(1 for c in results["cases"] if c["status"] == "success"),
+            "partial_count": sum(1 for c in results["cases"] if c["status"] == "partial"),
+            "failed_count": sum(1 for c in results["cases"] if c["status"] == "failed"),
+            "no_files_count": sum(1 for c in results["cases"] if c["status"] == "no_files"),
+        }
+
+        # Log the loop execution
+        log_process(
+            action="loop-cases",
+            status="success",
+            details=results,
+        )
+
+        safe_print(f"\n[STATS] Summary:")
+        safe_print(f"  [OK] Success: {results['summary']['success_count']}")
+        safe_print(f"  [!] Partial: {results['summary']['partial_count']}")
+        safe_print(f"  [X] Failed: {results['summary']['failed_count']}")
+        safe_print(f"  [ ] No files: {results['summary']['no_files_count']}")
+
+        if json_out:
+            safe_print("\n" + json.dumps(results, indent=2))
+
+    except Exception as e:
+        log_process(
+            action="loop-cases",
+            status="error",
+            error=e,
+        )
+        safe_print(f"Error running loop: {e}")
+        if json_out:
+            safe_print(json.dumps({"status": "error", "error": str(e)}))
+        sys.exit(1)
+
+
+def run_case(case_name, scenarios=None):
+    """Run a test case: setup inputs, trigger script, capture output, validate results."""
+    try:
+        cases = load_parameters()
+
+        if case_name not in cases:
+            log_process(
+                action="run-case",
+                status="failed",
+                case_name=case_name,
+                error="Case not found in parameters.jsonl",
+            )
+            safe_print(f"Case '{case_name}' not found")
+            sys.exit(1)
+
+        case_data = cases[case_name]
+        fixture_files = case_data.get("fixture_files", [])
+
+        safe_print(f"Running test case: {case_name}")
+
+        # Setup phase: ensure input files exist
+        if fixture_files:
+            safe_print(f"[OK] {len(fixture_files)} fixture file(s) available")
+            for fixture in fixture_files:
+                if Path(fixture).exists():
+                    safe_print(f"  [OK] {Path(fixture).name} ({Path(fixture).stat().st_size} bytes)")
+        else:
+            safe_print("[!] No fixture files set up for this case")
+
+        # Log the run
+        log_process(
+            action="run-case",
+            status="started",
+            case_name=case_name,
+            details={"fixtures_count": len(fixture_files), "scenarios": scenarios or "all"},
+        )
+
+        # Instructions for manual trigger
+        safe_print("\n[*] Instructions:")
+        safe_print("1. Open Windows Explorer or file search window")
+        if fixture_files:
+            safe_print("2. Navigate to and select these files:")
+            for fixture in fixture_files:
+                safe_print(f"   {fixture}")
+        safe_print("3. Press Ctrl+Shift+Alt+C to trigger the script")
+        safe_print("4. Script will log output to testing/ directory")
+        safe_print("5. Run 'python test.py validate-case -n \"" + case_name + "\"' to check results")
+
+        log_process(
+            action="run-case",
+            status="awaiting_input",
+            case_name=case_name,
+            details={"message": "Waiting for manual script trigger"},
+        )
+
+        safe_print("\n[...] Waiting for script execution (press Enter when done, or Ctrl+C to cancel)...")
+        try:
+            input()
+        except (KeyboardInterrupt, EOFError):
+            safe_print("\nCancelled.")
+            log_process(
+                action="run-case",
+                status="cancelled",
+                case_name=case_name,
+            )
+            return
+
+        # Check for execution logs
+        logs_file = TESTING_DIR / "logs" / "execution.jsonl"
+        if logs_file.exists():
+            try:
+                with open(logs_file, "r") as f:
+                    lines = f.readlines()
+                    if lines:
+                        for line in reversed(lines):
+                            try:
+                                last_log = json.loads(line.strip())
+                                if last_log:
+                                    safe_print(f"\n[OK] Script executed:")
+                                    safe_print(f"  Status: {last_log.get('status')}")
+                                    safe_print(f"  Files requested: {last_log.get('files_requested')}")
+                                    safe_print(f"  Files processed: {last_log.get('files_processed')}")
+                                    safe_print(f"  Files failed: {last_log.get('files_failed')}")
+                                    safe_print(f"  Files skipped: {last_log.get('files_skipped')}")
+                                    break
+                            except json.JSONDecodeError:
+                                continue
+            except Exception as e:
+                safe_print(f"[!] Could not read logs: {e}")
+
+        # Run validation
+        safe_print("\nValidating results...")
+        validate_case(case_name)
+
+        log_process(
+            action="run-case",
+            status="success",
+            case_name=case_name,
+        )
+
+    except Exception as e:
+        log_process(
+            action="run-case",
+            status="error",
+            case_name=case_name,
+            error=e,
+        )
+        safe_print(f"Error running case: {e}")
+        sys.exit(1)
+
+
 def validate_case(case_name):
-    """Validate case outputs against inputs and execution logs."""
+    """Validate case outputs against inputs and check captured clipboard outputs."""
     try:
         cases = load_parameters()
 
@@ -322,24 +578,23 @@ def validate_case(case_name):
                 case_name=case_name,
                 error="Case not found in parameters.jsonl",
             )
-            print(f"Case '{case_name}' not found")
+            safe_print(f"Case '{case_name}' not found")
             sys.exit(1)
 
         case_data = cases[case_name]
         test_inputs = case_data.get("test_input_paths", [])
+        fixture_files = case_data.get("fixture_files", [])
         output_files = case_data.get("relative_file_paths", [])
         logs_file = TESTING_DIR / "logs" / "execution.jsonl"
-
-        if not test_inputs:
-            print(f"No test inputs defined for case '{case_name}'")
-            return
 
         validation_results = {
             "case_name": case_name,
             "timestamp": datetime.now().isoformat(),
             "inputs_tested": len(test_inputs),
+            "fixtures_used": len(fixture_files),
             "outputs_generated": len(output_files),
             "validation_checks": [],
+            "captured_outputs": [],
         }
 
         # Check if input files exist
@@ -351,9 +606,22 @@ def validate_case(case_name):
             }
             validation_results["validation_checks"].append(check)
             if check["exists"]:
-                print(f"✓ Input: {input_path} ({check['size']} bytes)")
+                safe_print(f"[OK] Input: {input_path} ({check['size']} bytes)")
             else:
-                print(f"✗ Input not found: {input_path}")
+                safe_print(f"[X] Input not found: {input_path}")
+
+        # Check fixture files
+        for fixture_path in fixture_files:
+            check = {
+                "fixture_file": fixture_path,
+                "exists": Path(fixture_path).exists(),
+                "size": Path(fixture_path).stat().st_size if Path(fixture_path).exists() else 0,
+            }
+            validation_results["validation_checks"].append(check)
+            if check["exists"]:
+                print(f"✓ Fixture: {fixture_path} ({check['size']} bytes)")
+            else:
+                print(f"✗ Fixture not found: {fixture_path}")
 
         # Check if output files exist
         for output_file in output_files:
@@ -375,16 +643,56 @@ def validate_case(case_name):
 
                     check["has_content"] = True
                     check["content_length"] = len(content)
-                    check["inputs_found"] = sum(1 for inp in test_inputs if Path(inp).name in content)
 
-                    print(f"✓ Output: {output_file} ({size} bytes, found {check['inputs_found']} input filename(s))")
+                    # Check for markdown headers and input filenames
+                    headers = [line for line in content.split('\n') if line.startswith('# ')]
+                    check["markdown_headers"] = len(headers)
+
+                    # Check for fixture/input file references
+                    inputs_found = sum(1 for inp in test_inputs if Path(inp).name in content)
+                    fixtures_found = sum(1 for fix in fixture_files if Path(fix).name in content)
+                    check["inputs_found"] = inputs_found
+                    check["fixtures_found"] = fixtures_found
+                    check["has_markdown_formatting"] = len(headers) > 0
+
+                    print(f"✓ Output: {output_file} ({size} bytes, {len(headers)} headers)")
                 except Exception as e:
                     check["error"] = str(e)
-                    print(f"⚠ Output: {output_file} (error reading: {e})")
+                    safe_print(f"[!] Output: {output_file} (error reading: {e})")
             else:
-                print(f"✗ Output missing or empty: {output_file}")
+                safe_print(f"[X] Output missing or empty: {output_file}")
 
             validation_results["validation_checks"].append(check)
+
+        # Check for script output files (clipboard captures)
+        testing_dir = TESTING_DIR
+        script_outputs = list(testing_dir.glob("script-output-*.txt"))
+        if script_outputs:
+            safe_print(f"\n[*] Found {len(script_outputs)} captured clipboard outputs:")
+            for output_path in sorted(script_outputs):
+                try:
+                    size = output_path.stat().st_size
+                    with open(output_path, "r", errors="ignore") as f:
+                        content = f.read()
+
+                    headers = [line for line in content.split('\n') if line.startswith('# ')]
+                    capture_info = {
+                        "filename": output_path.name,
+                        "size": size,
+                        "headers_found": len(headers),
+                        "has_markdown": len(headers) > 0,
+                        "content_length": len(content),
+                    }
+
+                    # Check if fixture files are referenced
+                    fixtures_in_output = sum(1 for fix in fixture_files if Path(fix).name in content)
+                    if fixtures_in_output > 0:
+                        capture_info["fixtures_referenced"] = fixtures_in_output
+
+                    validation_results["captured_outputs"].append(capture_info)
+                    safe_print(f"  [OK] {output_path.name}: {len(headers)} headers, {size} bytes")
+                except Exception as e:
+                    safe_print(f"  [!] {output_path.name}: error reading ({e})")
 
         # Log validation
         log_process(
@@ -394,7 +702,8 @@ def validate_case(case_name):
             details=validation_results,
         )
 
-        print(f"\nValidation Summary: {validation_results['inputs_tested']} inputs, {validation_results['outputs_generated']} outputs checked")
+        summary = f"Validation Summary: {validation_results['inputs_tested']} inputs, {validation_results['fixtures_used']} fixtures, {len(script_outputs)} clipboard outputs checked"
+        safe_print(f"\n{summary}")
 
     except Exception as e:
         log_process(
@@ -403,7 +712,7 @@ def validate_case(case_name):
             case_name=case_name,
             error=e,
         )
-        print(f"Error validating case: {e}")
+        safe_print(f"Error validating case: {e}")
         sys.exit(1)
 
 
@@ -416,6 +725,7 @@ def main():
     gen_parser.add_argument("-n", "--name", dest="case_name", required=True, help="Name of the test case")
     gen_parser.add_argument("-d", "--description", dest="case_description", required=True, help="Description of the test case")
     gen_parser.add_argument("-p", "--paths", dest="test_paths", required=False, help="JSON array of file paths to test")
+    gen_parser.add_argument("-f", "--fixtures", dest="use_fixtures", required=False, help="JSON array of fixture files to copy (e.g., '[\"small.md\", \"large.txt\"]')")
 
     # Update case command
     update_parser = subparsers.add_parser("update-case", help="Create new iteration for an existing case")
@@ -424,6 +734,15 @@ def main():
     # Update paths command
     paths_parser = subparsers.add_parser("update-paths", help="Dynamically update relative file paths")
     paths_parser.add_argument("-n", "--name", dest="case_name", required=True, help="Name of the test case").completer = case_completer
+
+    # Loop cases command
+    loop_parser = subparsers.add_parser("loop-cases", help="Run all test cases and output results for agents")
+    loop_parser.add_argument("-j", "--json-out", dest="json_out", action="store_true", help="Output results as JSON")
+
+    # Run case command
+    run_parser = subparsers.add_parser("run-case", help="Run a test case and validate results")
+    run_parser.add_argument("-n", "--name", dest="case_name", required=True, help="Name of the test case").completer = case_completer
+    run_parser.add_argument("-s", "--scenarios", dest="scenarios", required=False, help="Comma-separated scenarios to test (e.g., single,multi,large)")
 
     # Validate case command
     validate_parser = subparsers.add_parser("validate-case", help="Validate case outputs against inputs")
@@ -442,11 +761,25 @@ def main():
             except json.JSONDecodeError:
                 print("Error: --paths must be valid JSON array")
                 sys.exit(1)
-        generate_case(args.case_name, args.case_description, test_paths)
+
+        use_fixtures = None
+        if args.use_fixtures:
+            try:
+                use_fixtures = json.loads(args.use_fixtures)
+            except json.JSONDecodeError:
+                print("Error: --fixtures must be valid JSON array")
+                sys.exit(1)
+
+        generate_case(args.case_name, args.case_description, test_paths, use_fixtures)
     elif args.command == "update-case":
         update_case(args.case_name)
     elif args.command == "update-paths":
         update_paths(args.case_name)
+    elif args.command == "loop-cases":
+        loop_cases(json_out=args.json_out)
+    elif args.command == "run-case":
+        scenarios = args.scenarios.split(",") if args.scenarios else None
+        run_case(args.case_name, scenarios)
     elif args.command == "validate-case":
         validate_case(args.case_name)
     else:
