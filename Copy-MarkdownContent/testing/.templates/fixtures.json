@@ -1,0 +1,26 @@
+{
+  "fixtures": {
+    "small": {
+      "filename": "small.md",
+      "description": "Minimal markdown for quick tests"
+    },
+    "large": {
+      "filename": "large.txt",
+      "description": "Large content for performance testing"
+    },
+    "code": {
+      "filename": "code.py",
+      "description": "Python source code for format testing"
+    },
+    "readme": {
+      "filename": "readme.txt",
+      "description": "Plain text document"
+    }
+  },
+  "presets": {
+    "quick": ["small"],
+    "multi-format": ["small", "code", "readme"],
+    "all": ["small", "large", "code", "readme"],
+    "performance": ["large"]
+  }
+}

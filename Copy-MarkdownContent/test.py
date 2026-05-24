@@ -23,9 +23,44 @@ def safe_print(text):
         safe_text = safe_text.replace('📊', '[STATS]').replace('📂', '[DIR]')
         print(safe_text)
 
+
+def load_fixtures_config():
+    """Load fixtures configuration from fixtures.json."""
+    if not FIXTURES_CONFIG_FILE.exists():
+        return {"fixtures": {}, "presets": {}}
+
+    with open(FIXTURES_CONFIG_FILE, "r") as f:
+        return json.load(f)
+
+
+def resolve_fixture_names(fixture_input):
+    """Resolve fixture names or preset names to actual fixture files."""
+    config = load_fixtures_config()
+    fixtures = config.get("fixtures", {})
+    presets = config.get("presets", {})
+
+    result = []
+
+    # Handle preset names or individual fixture names
+    for item in fixture_input:
+        if item in presets:
+            # It's a preset - expand it
+            for fixture_key in presets[item]:
+                if fixture_key in fixtures:
+                    result.append(fixtures[fixture_key]["filename"])
+        elif item in fixtures:
+            # It's a fixture key
+            result.append(fixtures[item]["filename"])
+        else:
+            # Assume it's a filename
+            result.append(item)
+
+    return result
+
 SCRIPT_DIR = Path(__file__).parent
 TESTING_DIR = SCRIPT_DIR / "testing"
 TEMPLATES_DIR = TESTING_DIR / ".templates"
+FIXTURES_CONFIG_FILE = TEMPLATES_DIR / "fixtures.json"
 PARAMETERS_FILE = TESTING_DIR / "parameters.jsonl"
 LOGS_FILE = TESTING_DIR / "process.jsonl"
 
@@ -146,21 +181,24 @@ def generate_case(case_name, case_description, test_paths=None, use_fixtures=Non
             fixtures_dir = TEMPLATES_DIR / "fixtures"
             if fixtures_dir.exists():
                 fixture_list = use_fixtures if isinstance(use_fixtures, list) else [use_fixtures]
-                for fixture in fixture_list:
+                # Resolve preset names and fixture keys to actual filenames
+                resolved_fixtures = resolve_fixture_names(fixture_list)
+
+                for fixture in resolved_fixtures:
                     fixture_path = fixtures_dir / fixture
                     if fixture_path.exists():
                         dest_path = inputs_dir / fixture
                         shutil.copy2(fixture_path, dest_path)
                         copied_fixtures.append(str(dest_path))
                         try:
-                            print(f"✓ Copied fixture: {fixture}")
+                            safe_print(f"[+] Copied fixture: {fixture}")
                         except (UnicodeEncodeError, UnicodeDecodeError):
-                            print(f"[+] Copied fixture: {fixture}")
+                            safe_print(f"[+] Copied fixture: {fixture}")
                     else:
                         try:
-                            print(f"⚠ Fixture not found: {fixture}")
+                            safe_print(f"[!] Fixture not found: {fixture}")
                         except (UnicodeEncodeError, UnicodeDecodeError):
-                            print(f"[!] Fixture not found: {fixture}")
+                            safe_print(f"[!] Fixture not found: {fixture}")
 
         # Generate relative file paths
         relative_paths = get_relative_file_paths(case_name, timestamp)
@@ -725,7 +763,7 @@ def main():
     gen_parser.add_argument("-n", "--name", dest="case_name", required=True, help="Name of the test case")
     gen_parser.add_argument("-d", "--description", dest="case_description", required=True, help="Description of the test case")
     gen_parser.add_argument("-p", "--paths", dest="test_paths", required=False, help="JSON array of file paths to test")
-    gen_parser.add_argument("-f", "--fixtures", dest="use_fixtures", required=False, help="JSON array of fixture files to copy (e.g., '[\"small.md\", \"large.txt\"]')")
+    gen_parser.add_argument("-f", "--fixtures", dest="use_fixtures", required=False, help="Comma-separated fixture keys or presets (e.g., 'small,large' or 'quick' or 'all')")
 
     # Update case command
     update_parser = subparsers.add_parser("update-case", help="Create new iteration for an existing case")
@@ -764,11 +802,8 @@ def main():
 
         use_fixtures = None
         if args.use_fixtures:
-            try:
-                use_fixtures = json.loads(args.use_fixtures)
-            except json.JSONDecodeError:
-                print("Error: --fixtures must be valid JSON array")
-                sys.exit(1)
+            # Support comma-separated names (no JSON needed)
+            use_fixtures = [f.strip() for f in args.use_fixtures.split(",")]
 
         generate_case(args.case_name, args.case_description, test_paths, use_fixtures)
     elif args.command == "update-case":

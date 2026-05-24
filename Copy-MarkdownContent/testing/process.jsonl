@@ -13,3 +13,8 @@
 {"timestamp": "2026-05-23T21:47:39.533131", "action": "run-case", "status": "started", "case_name": "my-test", "details": {"fixtures_count": 2, "scenarios": "all"}}
 {"timestamp": "2026-05-23T21:47:39.534088", "action": "run-case", "status": "awaiting_input", "case_name": "my-test", "details": {"message": "Waiting for manual script trigger"}}
 {"timestamp": "2026-05-23T21:47:39.534789", "action": "run-case", "status": "error", "case_name": "my-test", "details": {}, "error": "EOF when reading a line"}
+{"timestamp": "2026-05-23T21:50:20.159571", "action": "generate-case", "status": "success", "case_name": "test-debug", "details": {"timestamp": "2026_05_23-21_50", "file_count": 4, "fixtures_copied": 1}}
+{"timestamp": "2026-05-23T21:52:16.871909", "action": "generate-case", "status": "success", "case_name": "test-with-preset", "details": {"timestamp": "2026_05_23-21_52", "file_count": 4, "fixtures_copied": 1}}
+{"timestamp": "2026-05-24T12:48:26.007059", "action": "generate-case", "status": "success", "case_name": "test-multi-format", "details": {"timestamp": "2026_05_24-12_48", "file_count": 4, "fixtures_copied": 3}}
+{"timestamp": "2026-05-24T12:48:30.578772", "action": "generate-case", "status": "success", "case_name": "test-individual", "details": {"timestamp": "2026_05_24-12_48", "file_count": 4, "fixtures_copied": 2}}
+{"timestamp": "2026-05-24T12:48:54.350445", "action": "generate-case", "status": "success", "case_name": "powershell-test", "details": {"timestamp": "2026_05_24-12_48", "file_count": 4, "fixtures_copied": 4}}

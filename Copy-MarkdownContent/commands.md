@@ -8,26 +8,38 @@ These commands enable automated testing loops with fixture files and clipboard o
 
 ### Quick Start: Create & Run Test with Fixtures
 
-```powershell
-# 1. Create test case with fixture files
-python test.py generate-case -n "my-test" -d "Test description" -f '["small.md", "large.txt"]'
+No JSON needed - just use comma-separated fixture names or preset names:
 
-# 2. Run the test (guides manual trigger)
+```powershell
+# 1. Create test case with preset
+python test.py generate-case -n "my-test" -d "Test description" -f "quick"
+
+# 2. Or with multiple individual fixtures
+python test.py generate-case -n "my-test" -d "Test description" -f "small,code"
+
+# 3. Run the test (guides manual trigger)
 python test.py run-case -n "my-test"
 
-# 3. Validate results
+# 4. Validate results
 python test.py validate-case -n "my-test"
 
-# 4. Run all cases in a loop (agent-friendly)
+# 5. Run all cases in a loop (agent-friendly)
 python test.py loop-cases -j
 ```
 
-### What Fixtures Do
+### Available Fixtures & Presets
 
-- **small.md** - Simple markdown for quick tests
-- **large.txt** - Large text for performance testing  
-- **code.py** - Source code file for format testing
-- **readme.txt** - Plain text document
+**Presets** (easiest):
+- `quick` - Just small.md (fastest for initial testing)
+- `multi-format` - small.md, code.py, readme.txt
+- `all` - All fixtures (small, large, code, readme)
+- `performance` - Just large.txt (for stress testing)
+
+**Individual fixtures:**
+- `small` - Simple markdown (259 bytes)
+- `large` - Large text content (1.8 KB)
+- `code` - Python source code (44 lines)
+- `readme` - Plain text document (25 lines)
 
 Fixtures are automatically copied to `testing/{case}/inputs/` when you create a case with `-f` flag.
 
@@ -97,7 +109,15 @@ python test.py generate-case -n "case_name" -d "Case description"
 **With fixtures (copies sample files):**
 
 ```powershell
-python test.py generate-case -n "case_name" -d "Case description" -f '["small.md", "large.txt", "code.py"]'
+python test.py generate-case -n "case_name" -d "Case description" -f "small,large,code"
+```
+
+**With preset names (no quotes needed):**
+
+```powershell
+python test.py generate-case -n "case_name" -d "Case description" -f "quick"
+python test.py generate-case -n "case_name" -d "Case description" -f "multi-format"
+python test.py generate-case -n "case_name" -d "Case description" -f "all"
 ```
 
 **With external test input files:**
@@ -109,19 +129,38 @@ python test.py generate-case -n "case_name" -d "Case description" -p '["C:\path\
 **With both fixtures and external files:**
 
 ```powershell
-python test.py generate-case -n "case_name" -d "Case description" -f '["small.md"]' -p '["C:\file1.md"]'
+python test.py generate-case -n "case_name" -d "Case description" -f "small" -p '["C:\file1.md"]'
 ```
+
+**Available fixtures and presets:**
+
+Fixtures (use individually or in presets):
+- `small` - small.md
+- `large` - large.txt
+- `code` - code.py
+- `readme` - readme.txt
+
+Presets (shorthand for common combinations):
+- `quick` - small only (fastest)
+- `multi-format` - small, code, readme
+- `all` - all fixtures
+- `performance` - large only
 
 **Examples:**
 
-Clipboard handling test:
+Quick test with smallest file:
 ```powershell
-python test.py generate-case -n "clipboard_issues" -d "Testing clipboard handling" -p '["C:\Documents\test1.md","C:\Documents\test2.pdf"]'
+python test.py generate-case -n "quick-test" -d "Fast test" -f "quick"
 ```
 
-Multi-format test with fixtures:
+Multi-format test:
 ```powershell
-python test.py generate-case -n "multi-format" -d "Testing multiple file formats" -f '["small.md", "code.py", "readme.txt"]'
+python test.py generate-case -n "formats-test" -d "Testing multiple file formats" -f "multi-format"
+```
+
+With external files:
+```powershell
+python test.py generate-case -n "mixed-test" -d "Fixtures + external" -f "small" -p '["C:\Documents\external.md"]'
 ```
 
 ## Update Case (Create New Iteration)
